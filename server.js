@@ -11,26 +11,30 @@ const MONGODB_URI = process.env.MONGODB_URI || '';
 
 if (!MONGODB_URI) throw new Error('Falta MONGODB_URI en variables de entorno');
 
-const corsOptions = {
-  origin(origin, callback) {
-    if (!origin) return callback(null, true);
-    return callback(null, true);
-  },
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'x-api-key'],
-  optionsSuccessStatus: 200
+const corsDelegate = (req, callback) => {
+  const origin = req.header('Origin') || '*';
+  callback(null, {
+    origin: origin,
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'x-api-key'],
+    exposedHeaders: ['Content-Type'],
+    credentials: false,
+    maxAge: 86400
+  });
 };
 
-app.use(cors(corsOptions));
-app.options('*', cors(corsOptions));
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, x-api-key');
-  res.header('Vary', 'Origin');
-  if (req.method === 'OPTIONS') return res.sendStatus(200);
+  const origin = req.header('Origin') || '*';
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-api-key');
+  res.setHeader('Vary', 'Origin');
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
+
+app.use(cors(corsDelegate));
+app.options('*', cors(corsDelegate));
 app.use(express.json());
 
 const client = new MongoClient(MONGODB_URI);
@@ -60,6 +64,4 @@ app.get('/health', async (req, res) => {
   }
 });
 
-app.get('/api/courses', async (req, res) => {
-  try {
-    const raw = await db.collection('courses').find({ active: true }).sort(
+app.get('/api/courses', async (re
