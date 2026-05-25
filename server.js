@@ -4,15 +4,34 @@ const cors = require('cors');
 const { MongoClient } = require('mongodb');
 
 const app = express();
-app.use(cors());
-app.use(express.json());
-
 const PORT = process.env.PORT || 3000;
 const API_KEY = process.env.API_KEY || '';
 const DB_NAME = process.env.DB_NAME || 'colegio_cchn';
 const MONGODB_URI = process.env.MONGODB_URI || '';
 
 if (!MONGODB_URI) throw new Error('Falta MONGODB_URI en variables de entorno');
+
+const corsOptions = {
+  origin(origin, callback) {
+    if (!origin) return callback(null, true);
+    return callback(null, true);
+  },
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'x-api-key'],
+  optionsSuccessStatus: 200
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, x-api-key');
+  res.header('Vary', 'Origin');
+  if (req.method === 'OPTIONS') return res.sendStatus(200);
+  next();
+});
+app.use(express.json());
 
 const client = new MongoClient(MONGODB_URI);
 let db;
@@ -43,24 +62,4 @@ app.get('/health', async (req, res) => {
 
 app.get('/api/courses', async (req, res) => {
   try {
-    const raw = await db.collection('courses').find({ active: true }).sort({ level: 1, section: 1, name: 1 }).toArray();
-    const courses = raw.map(c => ({
-      _id: String(c._id),
-      id: String(c._id),
-      name: c.name || `${c.level || ''} ${c.section || ''}`.trim() || String(c._id),
-      level: c.level || '',
-      section: c.section || '',
-      schoolYear: c.schoolYear || null,
-      studentCount: c.studentCount || 0,
-      active: Boolean(c.active)
-    }));
-    res.json({ ok: true, courses });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
-app.get('/api/data', async (req, res) => {
-  try {
-    const courseId = String(req.query.courseId || '').trim();
-    const today 
+    const raw = await db.collection('courses').find({ active: true }).sort(
