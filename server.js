@@ -23,12 +23,11 @@ app.use((req, res, next) => {
 
 app.use(express.json());
 
-// Se importa el router de depuración si existe
 try {
   const debugApp = require('./server_debug');
   app.use(debugApp);
 } catch (e) {
-  console.log('No se cargó server_debug.js de forma independiente o no se encontró.');
+  console.log('No se encontró o no se pudo cargar server_debug.js');
 }
 
 const client = new MongoClient(MONGODB_URI);
@@ -89,7 +88,6 @@ app.get('/api/data', async (req, res) => {
     const emQuery = {};
     if (courseId) emQuery.courseId = courseId;
     
-    // CORRECCIÓN: Filtro con $or de fecha para evitar retornos vacíos
     if (today) {
       emQuery.$or = [
         { dayKey: today },
@@ -127,7 +125,7 @@ app.get('/api/data', async (req, res) => {
   }
 });
 
-// NUEVO ENDPOINT: Diagnóstico automático y sugerencia de remedial socioemocional
+// ENDPOINT CORREGIDO: Mapeo exacto basado en la tabla socioemocional Excel
 app.get('/api/remedials', async (req, res) => {
   try {
     const courseId = String(req.query.courseId || '').trim();
@@ -145,7 +143,7 @@ app.get('/api/remedials', async (req, res) => {
     const emotions = await db.collection('emotions').find(emQuery).toArray();
     
     if (emotions.length === 0) {
-      return res.json({ ok: true, hasData: false, message: 'Aún no se registran emociones hoy.' });
+      return res.json({ ok: true, hasData: false, message: 'Aún no se registran emociones para este curso el día de hoy.' });
     }
 
     const total = emotions.length;
@@ -178,17 +176,21 @@ app.get('/api/remedials', async (req, res) => {
     }
 
     let alertLevel = 'low';
-    let key = 'positive_stable';
+    let key = 'positive_stable'; // Por defecto: Feliz / Motivado
 
+    // LÓGICA DE SELECCIÓN DE RECOMENDACIÓN BASADA EN TU TABLA EXCEL
     if (pctNeg >= 40) {
       alertLevel = 'high';
-      key = 'negative_high';
-    } else if (pctNeg >= 15) {
+      key = 'critical'; // Nivel Crítico (+40% negativo)
+    } else if (dominantEmotion === 'Enojado 😠' || dominantEmotion === 'Muy mal 😢') {
+      alertLevel = 'high';
+      key = 'negative_high'; // Enojado / Alterado
+    } else if (dominantEmotion === 'Mal 😟') {
       alertLevel = 'medium';
-      key = 'negative_medium';
-    } else if (pctNeu >= 50) {
+      key = 'negative_medium'; // Ansioso / Preocupado
+    } else if (pctNeu >= 50 || dominantEmotion === 'Normal 😐') {
       alertLevel = 'medium';
-      key = 'neutral_high';
+      key = 'neutral_high'; // Neutral / Desmotivado
     }
 
     const recommendation = await db.collection('recommendations').findOne({ key, active: true });
@@ -201,9 +203,12 @@ app.get('/api/remedials', async (req, res) => {
       dominantEmotion,
       alertLevel,
       recommendation: recommendation || {
-        title: "Monitoreo General Regular",
-        description: "El clima del aula se encuentra en un estado favorable. Continúa con tus actividades pedagógicas habituales.",
-        resourceUrl: ""
+        title: "Clima Favorable y Refuerzo Positivo",
+        description: "La gran mayoría del curso se encuentra estable y con buena energía. Continúa con tus actividades pedagógicas normales.",
+        resources: [
+          { "label": "Pixabay Música Educativa", "url": "https://pixabay.com/es/music/", "type": "music" },
+          { "label": "Convivencia Escolar MINEDUC", "url": "https://convivenciaparaciudadania.mineduc.cl/", "type": "pdf" }
+        ]
       }
     });
 
@@ -217,7 +222,6 @@ app.post('/api/sync', async (req, res) => {
     const incoming = req.body.emotions;
     if (!Array.isArray(incoming) || incoming.length === 0) return res.status(400).json({ ok: false, error: 'emotions[] requerido' });
     
-    // CORRECCIÓN: Se asigna ID personalizado directamente en _id para prevenir duplicados
     const docs = incoming.map(e => ({
       _id: String(e.id || ''),
       id: String(e.id || ''), 
@@ -240,7 +244,6 @@ app.post('/api/sync', async (req, res) => {
       yearKey: String(e.yearKey || new Date().getFullYear())
     }));
     
-    // CORRECCIÓN: Se verifica duplicación basándonos en _id
     const existing = await db.collection('emotions').find({ _id: { $in: docs.map(d => d._id) } }).project({ _id: 1 }).toArray();
     const existingSet = new Set(existing.map(x => x._id));
     const toInsert = docs.filter(d => d._id && !existingSet.has(d._id));
@@ -253,7 +256,6 @@ app.post('/api/emotion/reset', async (req, res) => {
   try {
     const id = String(req.body.id || '').trim();
     if (!id) return res.status(400).json({ ok: false, error: 'id requerido' });
-    // CORRECCIÓN: Búsqueda y eliminación por clave primaria de forma rápida
     const result = await db.collection('emotions').deleteOne({ _id: id });
     res.json({ ok: true, deleted: result.deletedCount });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
@@ -263,7 +265,6 @@ app.post('/api/emotion/attend', async (req, res) => {
   try {
     const id = String(req.body.id || '').trim();
     if (!id) return res.status(400).json({ ok: false, error: 'id requerido' });
-    // CORRECCIÓN: Actualización rápida basada en _id
     const result = await db.collection('emotions').updateOne({ _id: id }, { $set: { attended: true } });
     res.json({ ok: true, modified: result.modifiedCount });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
@@ -272,7 +273,6 @@ app.post('/api/emotion/attend', async (req, res) => {
 async function start() {
   await client.connect();
   db = client.db(DB_NAME);
-  // Se asigna la base de datos de manera global para que server_debug.js funcione sin problemas
   global.db = db;
   console.log(`Conectado a MongoDB → ${DB_NAME}`);
   app.listen(PORT, () => console.log(`Servidor corriendo en puerto ${PORT}`));
